@@ -19,7 +19,13 @@ import kotlinx.android.synthetic.main.activity_main.*
 import pub.devrel.easypermissions.EasyPermissions
 import java.io.File
 
-class MainActivity : AppCompatActivity(),EasyPermissions.PermissionCallbacks, View.OnClickListener{
+class MainActivity : AppCompatActivity(),View.OnClickListener{
+
+    val EXTERNAL_STORAGE_REQUEST_CODE :Int = 24
+    private var downloadId : Long = 0
+    private lateinit var onDownloadComplete:BroadcastReceiver
+    lateinit var manager:DownloadManager
+
     override fun onClick(view: View?) {
         when(view){
             btn_cancel->{
@@ -48,18 +54,6 @@ class MainActivity : AppCompatActivity(),EasyPermissions.PermissionCallbacks, Vi
         }
     }
 
-    val EXTERNAL_STORAGE_REQUEST_CODE :Int = 24
-    override fun onPermissionsGranted(requestCode: Int, perms: MutableList<String>?) {
-
-    }
-
-    override fun onPermissionsDenied(requestCode: Int, perms: MutableList<String>?) {
-    }
-
-    private var downloadId : Long = 0
-    private lateinit var onDownloadComplete:BroadcastReceiver
-    lateinit var manager:DownloadManager
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -83,7 +77,6 @@ class MainActivity : AppCompatActivity(),EasyPermissions.PermissionCallbacks, Vi
                 if(id == downloadId){
                     btn_cancel.isEnabled = false
                     btn_cancel.alpha = 0.5F
-                    Toast.makeText(applicationContext,"File downloaded successfully",Toast.LENGTH_SHORT).show()
 
                 }
 
@@ -97,10 +90,45 @@ class MainActivity : AppCompatActivity(),EasyPermissions.PermissionCallbacks, Vi
         val request = DownloadManager.Request(Uri.parse(url))
         request.setDescription("PDF")
         request.setTitle("Sonam PDF Download")
-        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-        //request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, outputFileName)
-
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_ONLY_COMPLETION)
+        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, outputFileName)
         downloadId = manager.enqueue(request)
+
+        Thread(Runnable {
+            var downloading = true
+
+            while (downloading) {
+
+                val q = DownloadManager.Query()
+                q.setFilterById(downloadId)
+
+                val cursor = manager.query(q)
+                if(cursor.moveToFirst()) {
+                    val bytes_downloaded = cursor.getInt(
+                        cursor
+                            .getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                    )
+                    val bytes_total = cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+
+                    if (cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_SUCCESSFUL) {
+                        downloading = false
+                        runOnUiThread {
+                            Toast.makeText(applicationContext, "File Downloaded", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+
+                    val dl_progress = ((bytes_downloaded * 100L) / bytes_total).toInt()
+
+                    runOnUiThread {
+                        progressBar.setProgress(dl_progress)
+                        progressIndicator.setText("$dl_progress %")
+                    }
+
+                    cursor.close()
+                }
+            }
+        }).start()
+
         btn_cancel.isEnabled = true
         btn_cancel.alpha = 1F
         btn_check_status.isEnabled = true
@@ -185,10 +213,6 @@ class MainActivity : AppCompatActivity(),EasyPermissions.PermissionCallbacks, Vi
             }
         }
 
-        if(TextUtils.isEmpty(reasonText))
-            reasonText = "Error: ${reason.toString()}"
-
-
         var toast = Toast.makeText(this,
         statusText + "\n" +
                 reasonText,
@@ -196,6 +220,11 @@ class MainActivity : AppCompatActivity(),EasyPermissions.PermissionCallbacks, Vi
         toast.setGravity(Gravity.TOP, 25, 400);
         toast.show();
 
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterReceiver(onDownloadComplete)
     }
 
 
